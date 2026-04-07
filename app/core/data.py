@@ -101,6 +101,16 @@ _ADJUST_MAP = {
 }
 
 
+def _yf_ticker(symbol: str) -> Optional[str]:
+    if symbol.startswith(("5", "6", "9")):
+        return f"{symbol}.SS"
+    if symbol.startswith(("0", "2", "3")):
+        return f"{symbol}.SZ"
+    if symbol.startswith(("4", "8")):
+        return f"{symbol}.BJ"
+    return None
+
+
 def _try_eastmoney(req: HistoryRequest) -> Optional[pd.DataFrame]:
     secid = _market_code(req.symbol)
     if secid is None:
@@ -168,6 +178,59 @@ def _try_eastmoney(req: HistoryRequest) -> Optional[pd.DataFrame]:
     return data
 
 
+def _try_yfinance(req: HistoryRequest) -> Optional[pd.DataFrame]:
+    ticker = _yf_ticker(req.symbol)
+    if ticker is None:
+        return None
+
+    try:
+        import yfinance as yf  # type: ignore
+    except ModuleNotFoundError:
+        return None
+
+    try:
+        data = yf.download(
+            ticker,
+            start=req.start,
+            end=req.end + dt.timedelta(days=1),
+            auto_adjust=False,
+            progress=False,
+        )
+    except Exception:
+        return None
+
+    if data.empty:
+        return None
+
+    df = data.reset_index().rename(
+        columns={
+            "Date": "date",
+            "Open": "open",
+            "High": "high",
+            "Low": "low",
+            "Close": "close",
+            "Adj Close": "adj_close",
+            "Volume": "volume",
+        }
+    )
+    close_col = "close"
+    if req.adjust and req.adjust.lower() in {"qfq", "hfq"} and "adj_close" in df:
+        close_col = "adj_close"
+
+    df["close"] = df[close_col]
+    df = df.dropna(subset=["close"])
+    df["amount"] = df["close"] * df["volume"]
+    df = df[["date", "open", "high", "low", "close", "volume", "amount"]]
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.sort_values("date").reset_index(drop=True)
+    df.attrs["source"] = "yfinance"
+    df.attrs["sample_range"] = (
+        df["date"].min().date().isoformat(),
+        df["date"].max().date().isoformat(),
+    )
+    return df
+
+
 def _try_local_sample(req: HistoryRequest, base_path: Path) -> Optional[pd.DataFrame]:
     csv_path = base_path / f"{req.symbol}.csv"
     if not csv_path.exists():
@@ -228,6 +291,10 @@ def load_stock_history(
     east = _try_eastmoney(request)
     if east is not None:
         return east
+
+    yf_data = _try_yfinance(request)
+    if yf_data is not None:
+        return yf_data
 
     sample_base = sample_dir or Path(__file__).resolve().parent.parent / "resources"
     offline = _try_local_sample(request, sample_base)

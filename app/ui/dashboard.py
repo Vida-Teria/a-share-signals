@@ -175,6 +175,9 @@ def run() -> None:
     elif source == "eastmoney":
         _, end = history.attrs.get("sample_range", ("未知", "未知"))
         st.success(f"行情数据来自东方财富，已更新至 {end}。")
+    elif source == "yfinance":
+        _, end = history.attrs.get("sample_range", ("未知", "未知"))
+        st.success(f"行情数据来自 Yahoo Finance，已更新至 {end}。")
 
     with st.spinner("正在计算信号..."):
         result = generate_trade_signals(history)
