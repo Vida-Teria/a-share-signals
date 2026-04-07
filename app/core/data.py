@@ -117,10 +117,15 @@ def _try_eastmoney(req: HistoryRequest) -> Optional[pd.DataFrame]:
     )
 
     try:
-        resp = requests.get(
+        session = requests.Session()
+        session.trust_env = False  # ignore potentially broken corporate proxy settings
+        resp = session.get(
             url,
             timeout=8,
-            headers={"User-Agent": "Mozilla/5.0 (compatible; AShareSignalBot/1.0)"},
+            headers={
+                "User-Agent": "Mozilla/5.0 (compatible; AShareSignalBot/1.0)",
+                "Referer": "https://quote.eastmoney.com/",
+            },
         )
         resp.raise_for_status()
         payload = resp.json()

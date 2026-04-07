@@ -14,24 +14,27 @@ from app.core.signals import generate_trade_signals, summarize_signals
 
 
 def _render_header() -> None:
-    st.set_page_config(page_title="A股买卖点助手", layout="centered")
+    st.set_page_config(page_title="A股买卖点助手", layout="wide")
     st.markdown(
         """
         <style>
-        [data-testid="stAppViewContainer"]{
-            padding-top:1rem;
+        [data-testid="stSidebar"] section{
+            padding:1.2rem 1.4rem;
         }
         @media (max-width: 768px){
+            .block-container{
+                padding-top:1rem !important;
+                padding-left:0.75rem !important;
+                padding-right:0.75rem !important;
+            }
             [data-testid="stSidebar"]{
                 width:100% !important;
-                position:relative;
-                border-right:none;
+                position:relative !important;
+                border-right:none !important;
+                box-shadow:none !important;
             }
             [data-testid="stSidebar"] section{
-                padding:1rem 1.25rem;
-            }
-            [data-testid="stSidebarNav"]{
-                display:none;
+                padding:1rem 1.1rem;
             }
         }
         </style>
@@ -96,10 +99,11 @@ def _plot_with_signals(df):
 
     figure.update_layout(
         margin=dict(l=48, r=24, t=32, b=32),
-        height=520,
+        height=440,
         xaxis_title="交易日",
         yaxis_title="股价 (元)",
         xaxis_rangeslider_visible=False,
+        autosize=True,
     )
     return figure
 
@@ -177,7 +181,11 @@ def run() -> None:
         summary = summarize_signals(result)
 
     chart = _plot_with_signals(result)
-    st.plotly_chart(chart, use_container_width=True)
+    st.plotly_chart(
+        chart,
+        use_container_width=True,
+        config={"displayModeBar": False, "responsive": True},
+    )
 
     _render_summary(summary)
 
