@@ -10,6 +10,7 @@ local CSV sample when available.
 from __future__ import annotations
 
 import datetime as dt
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -188,21 +189,53 @@ def _try_yfinance(req: HistoryRequest) -> Optional[pd.DataFrame]:
     except ModuleNotFoundError:
         return None
 
+    # yfinance uses a shared requests session; disable inherited proxy config
     try:
-        data = yf.download(
-            ticker,
+        yf.utils.get_yf_session().trust_env = False  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
+    proxy_keys = [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "NO_PROXY",
+        "no_proxy",
+    ]
+    saved_env = {key: os.environ.get(key) for key in proxy_keys}
+    for key in proxy_keys:
+        os.environ.pop(key, None)
+
+    try:
+        history = yf.Ticker(ticker).history(
             start=req.start,
             end=req.end + dt.timedelta(days=1),
+            interval="1d",
             auto_adjust=False,
-            progress=False,
+            actions=False,
         )
     except Exception:
+        history = None
+    finally:
+        for key, value in saved_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+    if history is None:
         return None
 
-    if data.empty:
+    if history.empty:
         return None
 
-    df = data.reset_index().rename(
+    if isinstance(history.columns, pd.MultiIndex):
+        history.columns = history.columns.get_level_values(0)
+
+    df = history.reset_index().rename(
         columns={
             "Date": "date",
             "Open": "open",
@@ -213,13 +246,17 @@ def _try_yfinance(req: HistoryRequest) -> Optional[pd.DataFrame]:
             "Volume": "volume",
         }
     )
-    close_col = "close"
+    close_series = df.get("close")
+    if close_series is None and "Close" in df:
+        close_series = df["Close"]
     if req.adjust and req.adjust.lower() in {"qfq", "hfq"} and "adj_close" in df:
-        close_col = "adj_close"
+        close_series = df["adj_close"]
 
-    df["close"] = df[close_col]
-    df = df.dropna(subset=["close"])
-    df["amount"] = df["close"] * df["volume"]
+    if close_series is None:
+        return None
+
+    df = df.assign(close=close_series).dropna(subset=["close"])
+    df["amount"] = df["close"] * df["volume"].fillna(0)
     df = df[["date", "open", "high", "low", "close", "volume", "amount"]]
     df["date"] = pd.to_datetime(df["date"])
     df = df.sort_values("date").reset_index(drop=True)
