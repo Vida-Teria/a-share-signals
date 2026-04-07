@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
+import requests
 
 
 class DataUnavailableError(RuntimeError):
@@ -83,6 +84,85 @@ def _try_akshare(req: HistoryRequest) -> Optional[pd.DataFrame]:
     return data
 
 
+def _market_code(symbol: str) -> Optional[str]:
+    if symbol.startswith(("5", "6", "9")):
+        return f"1.{symbol}"  # Shanghai
+    if symbol.startswith(("0", "2", "3", "4", "8")):
+        return f"0.{symbol}"  # Shenzhen & Beijing boards
+    return None
+
+
+_ADJUST_MAP = {
+    "qfq": 1,
+    "hfq": 2,
+    "none": 0,
+    "": 0,
+    None: 0,
+}
+
+
+def _try_eastmoney(req: HistoryRequest) -> Optional[pd.DataFrame]:
+    secid = _market_code(req.symbol)
+    if secid is None:
+        return None
+
+    adjust_code = _ADJUST_MAP.get((req.adjust or "").lower(), 0)
+    beg = req.start.strftime("%Y%m%d")
+    end = req.end.strftime("%Y%m%d")
+    url = (
+        "https://push2his.eastmoney.com/api/qt/stock/kline/get"
+        f"?secid={secid}&fields1=f1,f2,f3,f4,f5,f6"
+        "&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60"
+        f"&klt=101&fqt={adjust_code}&beg={beg}&end={end}"
+    )
+
+    try:
+        resp = requests.get(
+            url,
+            timeout=8,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; AShareSignalBot/1.0)"},
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+    except Exception:
+        return None
+
+    klines = payload.get("data", {}).get("klines") or []
+    if not klines:
+        return None
+
+    records = []
+    for line in klines:
+        parts = line.split(",")
+        if len(parts) < 7:
+            continue
+        date_str, open_, close, high, low, volume, amount = parts[:7]
+        records.append(
+            {
+                "date": pd.to_datetime(date_str),
+                "open": float(open_),
+                "close": float(close),
+                "high": float(high),
+                "low": float(low),
+                # Eastmoney volume is in lots; convert to shares for consistency.
+                "volume": float(volume) * 100,
+                "amount": float(amount),
+            }
+        )
+
+    if not records:
+        return None
+
+    data = pd.DataFrame(records).dropna(subset=["close"])
+    data = data.sort_values("date").reset_index(drop=True)
+    data.attrs["source"] = "eastmoney"
+    data.attrs["sample_range"] = (
+        data["date"].min().date().isoformat(),
+        data["date"].max().date().isoformat(),
+    )
+    return data
+
+
 def _try_local_sample(req: HistoryRequest, base_path: Path) -> Optional[pd.DataFrame]:
     csv_path = base_path / f"{req.symbol}.csv"
     if not csv_path.exists():
@@ -139,6 +219,10 @@ def load_stock_history(
     live = _try_akshare(request)
     if live is not None:
         return live
+
+    east = _try_eastmoney(request)
+    if east is not None:
+        return east
 
     sample_base = sample_dir or Path(__file__).resolve().parent.parent / "resources"
     offline = _try_local_sample(request, sample_base)

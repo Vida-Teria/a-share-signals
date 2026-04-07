@@ -14,7 +14,30 @@ from app.core.signals import generate_trade_signals, summarize_signals
 
 
 def _render_header() -> None:
-    st.set_page_config(page_title="A股买卖点助手", layout="wide")
+    st.set_page_config(page_title="A股买卖点助手", layout="centered")
+    st.markdown(
+        """
+        <style>
+        [data-testid="stAppViewContainer"]{
+            padding-top:1rem;
+        }
+        @media (max-width: 768px){
+            [data-testid="stSidebar"]{
+                width:100% !important;
+                position:relative;
+                border-right:none;
+            }
+            [data-testid="stSidebar"] section{
+                padding:1rem 1.25rem;
+            }
+            [data-testid="stSidebarNav"]{
+                display:none;
+            }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     st.title("A股买卖点助手")
     st.caption(
         "输入股票代码（如 `600519` 或 `000001`），系统将基于趋势与动量指标给出近期买卖点建议。"
@@ -142,6 +165,12 @@ def run() -> None:
         st.info(
             f"当前使用的是内置样例数据，时间范围 {start} 至 {end}。如需实时行情，请在可联网环境下运行。"
         )
+    elif source == "akshare":
+        _, end = history.attrs.get("sample_range", ("未知", "未知"))
+        st.success(f"行情数据来自 Akshare，已更新至 {end}。")
+    elif source == "eastmoney":
+        _, end = history.attrs.get("sample_range", ("未知", "未知"))
+        st.success(f"行情数据来自东方财富，已更新至 {end}。")
 
     with st.spinner("正在计算信号..."):
         result = generate_trade_signals(history)
