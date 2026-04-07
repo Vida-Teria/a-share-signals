@@ -136,6 +136,13 @@ def run() -> None:
         st.error(str(exc))
         st.stop()
 
+    source = history.attrs.get("source")
+    if source == "local_sample":
+        start, end = history.attrs.get("sample_range", ("未知", "未知"))
+        st.info(
+            f"当前使用的是内置样例数据，时间范围 {start} 至 {end}。如需实时行情，请在可联网环境下运行。"
+        )
+
     with st.spinner("正在计算信号..."):
         result = generate_trade_signals(history)
         summary = summarize_signals(result)

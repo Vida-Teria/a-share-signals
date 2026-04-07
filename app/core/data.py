@@ -75,6 +75,11 @@ def _try_akshare(req: HistoryRequest) -> Optional[pd.DataFrame]:
     data[numeric_cols] = data[numeric_cols].apply(pd.to_numeric, errors="coerce")
     data = data.dropna(subset=["close"])
     data = data.sort_values("date").reset_index(drop=True)
+    data.attrs["source"] = "akshare"
+    data.attrs["sample_range"] = (
+        data["date"].min().date().isoformat(),
+        data["date"].max().date().isoformat(),
+    )
     return data
 
 
@@ -90,10 +95,28 @@ def _try_local_sample(req: HistoryRequest, base_path: Path) -> Optional[pd.DataF
     except Exception:
         return None
 
-    data = data[(data["date"].dt.date >= req.start) & (data["date"].dt.date <= req.end)]
-    if data.empty:
+    if data.empty or "date" not in data:
         return None
-    return data.sort_values("date").reset_index(drop=True)
+
+    data = data.sort_values("date").reset_index(drop=True)
+
+    available_start = data["date"].min().date()
+    available_end = data["date"].max().date()
+
+    start = max(req.start, available_start)
+    end = min(req.end, available_end)
+    window = data[(data["date"].dt.date >= start) & (data["date"].dt.date <= end)]
+
+    if window.empty:
+        window = data
+
+    window = window.reset_index(drop=True)
+    window.attrs["source"] = "local_sample"
+    window.attrs["sample_range"] = (
+        available_start.isoformat(),
+        available_end.isoformat(),
+    )
+    return window
 
 
 def load_stock_history(
@@ -125,4 +148,3 @@ def load_stock_history(
     raise DataUnavailableError(
         f"无法获取 {symbol} 的行情数据。请确认网络可用或提供本地样例数据。"
     )
-
